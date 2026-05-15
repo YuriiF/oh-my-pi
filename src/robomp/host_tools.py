@@ -11,7 +11,7 @@ import json
 import logging
 import subprocess
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -34,6 +34,34 @@ _PRE_PR_FIX_TIMEOUT_SECONDS = 600.0
 _PRE_PR_CHECK_TIMEOUT_SECONDS = 600.0
 _PRE_PR_CHECK_MAX_OUTPUT = 12_000
 _PRE_PR_FIX_COMMIT_SUBJECT = "style: bun run fix"
+
+
+@dataclass(slots=True)
+class AbortController:
+    """Mutable handoff between the `abort_task` host tool and the worker.
+
+    `signal()` is called from the host-tool thread to request an irrecoverable
+    teardown of the omp subprocess. The worker pre-populates `stop` with a
+    thread-safe terminator (the same one used for queue cancellation and the
+    hard-timeout watchdog), and inspects `triggered` after `prompt_and_wait`
+    unblocks to decide whether the resulting `RpcError` is an intentional
+    abort (swallow, mark event `done`) vs an actual failure (propagate).
+    """
+
+    triggered: bool = False
+    reason: str = ""
+    stop: Callable[[], None] | None = None
+
+    def signal(self, reason: str) -> None:
+        # Idempotent. Only the first call records its reason; later calls are
+        # silent no-ops so a retry inside the tool can't overwrite the
+        # original diagnosis with a generic follow-up message.
+        if self.triggered:
+            return
+        self.triggered = True
+        self.reason = reason
+        if self.stop is not None:
+            self.stop()
 
 
 @dataclass(slots=True, frozen=True)
@@ -63,6 +91,10 @@ class ToolBindings:
     # itself does not carry triage labels.
     inbound_is_pr: bool = False
     slot_uid: int | None = None
+    # Set by the worker before launching omp. Carries the abort-task signal
+    # back out to the worker; `None` for unit tests that exercise tools
+    # without a live RpcClient.
+    abort: AbortController | None = None
 
     @property
     def issue_key(self) -> str:
@@ -837,6 +869,40 @@ def _build_mark_unable(bindings: ToolBindings) -> HostTool[Any, Any]:
     )
 
 
+# ---------- abort_task ----------
+def _build_abort_task(bindings: ToolBindings) -> HostTool[Any, Any]:
+    def execute(args: dict[str, Any], _ctx: HostToolContext[Any]) -> str:
+        reason = args.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            _raise_command("abort_task requires a non-empty 'reason' string.")
+        reason = reason.strip()
+        # Audit FIRST so the diagnosis is durable even if anything below
+        # races against the imminent omp teardown.
+        _audit(bindings, "abort_task", args, result={"reason": reason})
+        log.warning(
+            "task_aborted",
+            extra={"issue": bindings.issue_key, "reason": reason},
+        )
+        bindings.db.set_issue_state(bindings.issue_key, "abandoned")
+        if bindings.abort is not None:
+            bindings.abort.signal(reason)
+        return "aborted"
+
+    return host_tool(
+        name="abort_task",
+        description=persona.host_tool_description("abort_task"),
+        parameters={
+            "type": "object",
+            "properties": {
+                "reason": {"type": "string"},
+            },
+            "required": ["reason"],
+            "additionalProperties": False,
+        },
+        execute=execute,
+    )
+
+
 # ---------- fetch_issue_thread ----------
 def _build_fetch_thread(bindings: ToolBindings) -> HostTool[Any, Any]:
     def execute(args: dict[str, Any], _ctx: HostToolContext[Any]) -> str:
@@ -1030,6 +1096,7 @@ def _build_classify_issue(bindings: ToolBindings) -> HostTool[Any, Any]:
                     bindings.workspace,
                     branch_slug,
                     pr_number=existing.pr_number if existing is not None else None,
+                    slot_uid=bindings.slot_uid,
                 )
             except ValueError as exc:
                 _audit(bindings, "classify_issue", args, error=str(exc))
@@ -1125,8 +1192,9 @@ def build(bindings: ToolBindings) -> tuple[HostTool[Any, Any], ...]:
         _build_request_review(bindings),
         _build_repro_record(bindings),
         _build_mark_unable(bindings),
+        _build_abort_task(bindings),
         _build_fetch_thread(bindings),
     )
 
 
-__all__ = ["ToolBindings", "build"]
+__all__ = ["AbortController", "ToolBindings", "build"]

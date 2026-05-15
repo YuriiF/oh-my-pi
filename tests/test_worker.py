@@ -124,6 +124,7 @@ def _make_inputs(
         repo=repo,
         issue=issue,
         issue_key=f"{repo.full_name}#{issue.number}",
+        abort=None,
     )
     return inputs, bindings
 

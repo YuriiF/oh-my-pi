@@ -14,7 +14,7 @@ from omp_rpc import HostToolContext, RpcCommandError
 
 from robomp.db import Database
 from robomp.github_client import GitHubClient, IssueInfo, RepoInfo
-from robomp.host_tools import ToolBindings, build
+from robomp.host_tools import AbortController, ToolBindings, build
 from robomp.sandbox import LocalGitTransport, Workspace
 
 
@@ -277,6 +277,78 @@ def test_mark_unable_posts_comment_and_abandons(db: Database, tmp_path: Path) ->
     assert "Could not reproduce" in captured["body"]["body"]
     issue = db.get_issue(bindings.issue_key)
     assert issue and issue.state == "abandoned"
+
+
+def test_abort_task_signals_controller_and_abandons_without_comment(db: Database, tmp_path: Path) -> None:
+    # Any HTTP call is a regression: abort_task MUST NOT touch GitHub.
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"abort_task issued an HTTP request to {request.url}")
+
+    bindings, loop, t = _bindings(db, tmp_path, httpx.MockTransport(handler))
+    controller = AbortController()
+    stops: list[None] = []
+    controller.stop = lambda: stops.append(None)
+    # Frozen dataclass — rebuild with the controller attached.
+    bindings = ToolBindings(
+        db=bindings.db,
+        github=bindings.github,
+        git_transport=bindings.git_transport,
+        repo=bindings.repo,
+        issue=bindings.issue,
+        workspace=bindings.workspace,
+        loop=bindings.loop,
+        author_name=bindings.author_name,
+        author_email=bindings.author_email,
+        settings=bindings.settings,
+        inbound_thread_number=bindings.inbound_thread_number,
+        inbound_is_pr=bindings.inbound_is_pr,
+        slot_uid=bindings.slot_uid,
+        abort=controller,
+    )
+    try:
+        tool = next(x for x in build(bindings) if x.name == "abort_task")
+        result = tool.execute({"reason": "ref dir owned by foreign uid; git commit cannot lock HEAD"}, _ctx())
+    finally:
+        _stop_loop(loop, t)
+    assert result == "aborted"
+    assert controller.triggered
+    assert "foreign uid" in controller.reason
+    assert len(stops) == 1, "stop callback must fire exactly once"
+    issue = db.get_issue(bindings.issue_key)
+    assert issue and issue.state == "abandoned"
+    # Audit row records the call. Use raw SQL because `Database` exposes a
+    # writer but no reader for `tool_calls` — the dashboard reads via SQL too.
+    with db._lock:  # noqa: SLF001 - test-only inspection
+        row = db._conn.execute(  # noqa: SLF001
+            "SELECT tool, args_json FROM tool_calls WHERE issue_key=? AND tool=?",
+            (bindings.issue_key, "abort_task"),
+        ).fetchone()
+    assert row is not None
+    assert "foreign uid" in row["args_json"]
+
+
+def test_abort_task_rejects_empty_reason(db: Database, tmp_path: Path) -> None:
+    bindings, loop, t = _bindings(db, tmp_path, httpx.MockTransport(lambda r: httpx.Response(500)))
+    try:
+        tool = next(x for x in build(bindings) if x.name == "abort_task")
+        with pytest.raises(RpcCommandError):
+            tool.execute({"reason": "   "}, _ctx())
+    finally:
+        _stop_loop(loop, t)
+    # No state change on rejected validation.
+    issue = db.get_issue(bindings.issue_key)
+    assert issue and issue.state == "reproducing"
+
+
+def test_abort_task_signal_is_idempotent(db: Database, tmp_path: Path) -> None:
+    controller = AbortController()
+    fires: list[None] = []
+    controller.stop = lambda: fires.append(None)
+    controller.signal("first")
+    controller.signal("second")
+    assert controller.triggered
+    assert controller.reason == "first"  # second call must not overwrite
+    assert len(fires) == 1, "stop must not be called again after the first abort"
 
 
 def test_fetch_issue_thread_returns_markdown(db: Database, tmp_path: Path) -> None:

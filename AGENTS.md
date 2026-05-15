@@ -86,7 +86,7 @@ Lint + format: TypeScript via Biome (config in `biome.json`), Python via Ruff (c
 - `src/robomp/queue.py` — `WorkerPool` dispatcher and `_inflight` serialization.
 - `src/robomp/tasks.py` — the five task entry points the dispatcher calls.
 - `src/robomp/worker.py` — synchronous omp RPC driver, prompt assembly via `persona`.
-- `src/robomp/host_tools.py` — agent's GitHub surface; tool list: `classify_issue`, `set_issue_labels`, `gh_post_comment`, `repro_record`, `gh_push_branch`, `gh_open_pr`, `gh_request_review`, `mark_unable_to_reproduce`, `fetch_issue_thread`.
+- `src/robomp/host_tools.py` — agent's GitHub surface; tool list: `classify_issue`, `set_issue_labels`, `gh_post_comment`, `repro_record`, `gh_push_branch`, `gh_open_pr`, `gh_request_review`, `mark_unable_to_reproduce`, `abort_task`, `fetch_issue_thread`.
 - `src/robomp/sandbox.py` — clone pool + worktree lifecycle, `GitCommandError`, credential redaction.
 - `src/robomp/github_client.py` — typed httpx client; parses webhook payloads into `IssueInfo` / `CommentInfo` / `PullRequestInfo`.
 - `src/robomp/github_events.py` — routing and HMAC verification.

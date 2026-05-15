@@ -91,16 +91,17 @@ RUN pip install /tmp/wheels/omp_rpc-*.whl && rm -rf /tmp/wheels
 WORKDIR /app
 
 # `omp` shim — calls into the mounted pi checkout via Bun.
-RUN cat > /usr/local/bin/omp <<'EOF' && chmod +x /usr/local/bin/omp
-#!/usr/bin/env bash
-set -euo pipefail
-: "${PI_ROOT:=/work/pi}"
-if [ ! -d "$PI_ROOT/packages/coding-agent" ]; then
-  echo "roboomp: PI_ROOT=$PI_ROOT does not look like a pi checkout" >&2
-  exit 127
-fi
-exec bun "$PI_ROOT/packages/coding-agent/src/cli.ts" "$@"
-EOF
+RUN printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    ': "${PI_ROOT:=/work/pi}"' \
+    'if [ ! -d "$PI_ROOT/packages/coding-agent" ]; then' \
+    '  echo "roboomp: PI_ROOT=$PI_ROOT does not look like a pi checkout" >&2' \
+    '  exit 127' \
+    'fi' \
+    'exec bun "$PI_ROOT/packages/coding-agent/src/cli.ts" "$@"' \
+    > /usr/local/bin/omp \
+    && chmod +x /usr/local/bin/omp
 
 # roboomp itself. Drop the Vite-built dashboard into the package tree before
 # `pip install` so it lands in the installed wheel (`static/**/*` is declared

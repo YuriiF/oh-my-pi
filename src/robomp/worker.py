@@ -35,7 +35,7 @@ from robomp.config import Settings
 from robomp.db import Database, issue_key
 from robomp.github_backend import GitHubBackend
 from robomp.github_client import CommentInfo, IssueInfo, RepoInfo
-from robomp.host_tools import ToolBindings
+from robomp.host_tools import AbortController, ToolBindings
 from robomp.sandbox import GitTransport, Workspace, _prepare_slot_tmpdir
 
 log = logging.getLogger(__name__)
@@ -403,6 +403,8 @@ def _run_rpc_blocking(
                     RpcProcessExitError("cancelled by operator")
                 )
 
+        if bindings.abort is not None:
+            bindings.abort.stop = _cancel_hook
         register_cancel_hook(_cancel_hook)
         try:
             client.install_headless_ui()
@@ -473,7 +475,20 @@ def _run_rpc_blocking(
             hard_timer.daemon = True
             hard_timer.start()
             try:
-                turn = client.prompt_and_wait(prompt, timeout=settings.task_timeout_seconds)
+                try:
+                    turn = client.prompt_and_wait(prompt, timeout=settings.task_timeout_seconds)
+                except (RpcError, RpcProcessExitError):
+                    # Did the agent intentionally pull the plug via `abort_task`?
+                    # If so, swallow — the abort path is a clean exit, not a
+                    # failure that should surface in the dashboard or trigger
+                    # a comment to the reporter. Anything else propagates.
+                    if bindings.abort is not None and bindings.abort.triggered:
+                        log.info(
+                            "rpc_aborted_by_tool",
+                            extra={"issue": bindings.issue_key, "task": task_kind, "reason": bindings.abort.reason},
+                        )
+                        return None
+                    raise
             finally:
                 hard_timer.cancel()
             if hard_timeout_fired.is_set():
@@ -517,6 +532,7 @@ async def run_task(
         inbound_thread_number=pr_number,
         inbound_is_pr=pr_number is not None,
         slot_uid=inputs.slot_uid,
+        abort=AbortController(),
     )
     resuming = _has_prior_session(inputs.workspace.session_dir)
     prompt = _build_prompt(

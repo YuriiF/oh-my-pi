@@ -32,6 +32,12 @@ reproduced = "True when the recorded run demonstrates the bug."
 [mark_unable_to_reproduce]
 description = "Close the loop without a PR: comment with diagnosis + info request, mark issue abandoned."
 
+[abort_task]
+description = "Irrecoverably abandon this task WITHOUT posting any visible message. Use ONLY for orchestrator/environment defects you cannot work around (broken filesystem permissions, missing system tools, corrupted git metadata, harness bugs). NEVER for normal workflow problems — failed builds, missing repro info, unclear requests use `gh_post_comment` or `mark_unable_to_reproduce` instead. `reason` is audit-only and NEVER shown to the reporter."
+
+[abort_task.parameters]
+reason = "Internal diagnosis for the operator. Concrete, specific, blameless. NEVER shown to the reporter."
+
 [fetch_issue_thread]
 description = "Refetch the originating issue and its comments. Use sparingly."
 
