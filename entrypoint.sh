@@ -32,8 +32,11 @@ fi
 max_slots="${ROBOMP_MAX_CONCURRENCY:-8}"
 for i in $(seq 1 "$max_slots"); do
     user="omp-$i"
-    uid=$((2000 + i))
-    id -u "$user" >/dev/null 2>&1 || /usr/sbin/useradd -u "$uid" -g omp -M -N -s /usr/sbin/nologin "$user"
+    slot_group="omp-$i"
+    slot_id=$((2000 + i))
+    /usr/sbin/groupadd -f -g "$slot_id" "$slot_group"
+    id -u "$user" >/dev/null 2>&1 || /usr/sbin/useradd -u "$slot_id" -g "$slot_group" -G omp -M -N -s /usr/sbin/nologin "$user"
+    /usr/sbin/usermod -g "$slot_group" -a -G omp "$user"
 done
 
 mkdir -p /data/workspaces /data/workspaces/_pool /data/logs
@@ -45,11 +48,22 @@ chown -R root:omp /data/cache /data/workspaces/_pool
 chmod -R u=rwX,g=rwsX,o= /data/cache /data/workspaces/_pool
 chmod 0700 /data/logs
 
+rm -rf /srv/agent-home/.agent /srv/agent-home/.omp/agent
 mkdir -p /srv/agent-home/.agent /srv/agent-home/.omp/agent
+if [ -e /srv/agent-home-stage/.agent ]; then
+    cp -a /srv/agent-home-stage/.agent/. /srv/agent-home/.agent/
+fi
+if [ -e /srv/agent-home-stage/.omp/agent ]; then
+    cp -a /srv/agent-home-stage/.omp/agent/. /srv/agent-home/.omp/agent/
+fi
 chown -R root:root /srv/agent-home || true
-chmod -R a+rX /srv/agent-home || true
+find /srv/agent-home -type d -exec chmod 0755 {} +
+find /srv/agent-home -type f -exec chmod 0644 {} +
 
-for db_file in /data/robomp.sqlite /data/robomp.sqlite-wal /data/robomp.sqlite-shm; do
+touch /data/robomp.sqlite
+chown root:root /data/robomp.sqlite
+chmod 0600 /data/robomp.sqlite
+for db_file in /data/robomp.sqlite-wal /data/robomp.sqlite-shm; do
     if [ -e "$db_file" ]; then
         chown root:root "$db_file"
         chmod 0600 "$db_file"

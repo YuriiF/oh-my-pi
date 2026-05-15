@@ -77,18 +77,14 @@ services:
     volumes:
       - ${PI_ROOT:-/work/pi}:/work/pi:ro
       - ./data:/data
-      # Provider config (proxy endpoints + stub api keys). Credentials stay on
-      # the host; only the routing config is exposed to the container. The agent
-      # subprocess runs with HOME=/srv/agent-home, so ~/.omp resolves there.
-      - ${HOME}/.omp/agent/models.yml:/srv/agent-home/.omp/agent/models.yml:ro
-      # Personal omp agent config from the host: the global AGENTS.md context
-      # file and the rules library. The loader (`packages/coding-agent/src/
-      # discovery/agents.ts`) walks `~/.agent/{AGENTS.md,rules,…}`; with
-      # HOME=/srv/agent-home, ~/.agent resolves under /srv/agent-home. Mount the
-      # host's `AGENT.md` (singular) onto the container path `AGENTS.md`
-      # (plural) to match the expected name without renaming on the host.
-      - ${HOME}/.agent/AGENT.md:/srv/agent-home/.agent/AGENTS.md:ro
-      - ${HOME}/.agent/rules:/srv/agent-home/.agent/rules:ro
+      # Host agent config is mounted read-only under /srv/agent-home-stage
+      # with host-controlled permissions. The entrypoint copies it into
+      # root-owned, world-readable files under /srv/agent-home; the agent
+      # subprocess runs with HOME=/srv/agent-home, so ~/.omp and ~/.agent
+      # resolve there without exposing mutable host mounts.
+      - ${HOME}/.omp/agent/models.yml:/srv/agent-home-stage/.omp/agent/models.yml:ro
+      - ${HOME}/.agent/AGENT.md:/srv/agent-home-stage/.agent/AGENTS.md:ro
+      - ${HOME}/.agent/rules:/srv/agent-home-stage/.agent/rules:ro
     ports:
       - "8080:8080"
 
