@@ -300,6 +300,12 @@ class FakeAgentSession {
 
 	async sendCustomMessage(_message: string, _options?: unknown): Promise<void> {}
 
+	autonomousTurnGuard: (() => boolean) | undefined = undefined;
+
+	setAutonomousTurnGuard(guard: (() => boolean) | undefined): void {
+		this.autonomousTurnGuard = guard;
+	}
+
 	async sendUserMessage(_content: string, _options?: unknown): Promise<void> {}
 
 	async compact(_instructions?: string, _options?: unknown): Promise<void> {}
@@ -1584,5 +1590,52 @@ describe("ACP agent", () => {
 			expect(second.sessionId).toBe("session-after-switch");
 			expect(third.sessionId).toBe("session-after-switch");
 		});
+	});
+});
+
+describe("ACP autonomous turn guard (regression #1137)", () => {
+	it("installs a guard on sessions managed by AcpAgent and clears it on close", async () => {
+		const harness = await createHarness();
+		const { sessionId } = await harness.agent.newSession({ cwd: harness.cwdA, mcpServers: [] });
+
+		const session = harness.findSession(sessionId);
+		expect(session).toBeDefined();
+
+		// AcpAgent must have installed the guard when the session was registered
+		expect(typeof session!.autonomousTurnGuard).toBe("function");
+
+		// Guard should return false when no ACP prompt is in flight
+		expect(session!.autonomousTurnGuard!()).toBe(false);
+
+		await harness.agent.closeSession({ sessionId });
+
+		// Guard must be cleared on dispose
+		expect(session!.autonomousTurnGuard).toBeUndefined();
+	});
+
+	it("guard allows turn while ACP prompt lifecycle is active", async () => {
+		const harness = await createHarness();
+		const { sessionId } = await harness.agent.newSession({ cwd: harness.cwdA, mcpServers: [] });
+		const session = harness.findSession(sessionId)!;
+
+		// Guard is false before any prompt
+		expect(session.autonomousTurnGuard!()).toBe(false);
+
+		// Start a prompt and hold it in flight
+		const releaseStreaming = holdPromptStreaming(session);
+		const promptPromise = harness.agent.prompt({ sessionId, prompt: [{ type: "text", text: "hello" }] });
+
+		// Give the prompt machinery a tick to settle into in-flight state
+		await Bun.sleep(0);
+
+		// Guard must return true while a prompt turn is in flight
+		expect(session.autonomousTurnGuard!()).toBe(true);
+
+		// Release streaming so the prompt can finish
+		releaseStreaming();
+		await promptPromise;
+
+		// Guard must return false again once the prompt has settled
+		expect(session.autonomousTurnGuard!()).toBe(false);
 	});
 });

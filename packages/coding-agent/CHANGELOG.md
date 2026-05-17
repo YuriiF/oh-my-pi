@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- ACP: background job completions no longer start an ownerless LLM turn after the `session/prompt` response has been returned to the client. `sendCustomMessage(..., { triggerTurn: true })` calls are now deferred to the next client-initiated prompt when no ACP prompt lifecycle is active ([#1137](https://github.com/can1357/oh-my-pi/issues/1137)).
+
 ## [15.1.3] - 2026-05-17
 ### Breaking Changes
 

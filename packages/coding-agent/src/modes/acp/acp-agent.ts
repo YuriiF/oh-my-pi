@@ -937,6 +937,11 @@ export class AcpAgent implements Agent {
 	async #registerPreparedSession(session: AgentSession, mcpServers: McpServer[]): Promise<ManagedSessionRecord> {
 		const record = this.#createManagedSessionRecord(session);
 		session.setClientBridge(createAcpClientBridge(this.#connection, session.sessionId, this.#clientCapabilities));
+		// Guard that defers autonomous turn triggers (e.g. background job deliveries)
+		// when no ACP prompt lifecycle is currently active. Without this, a job
+		// completing after the ACP prompt response is sent would start an ownerless
+		// turn that Zed has no way to track (see #1137).
+		session.setAutonomousTurnGuard(() => isPromptTurnInFlight(record.promptTurn));
 		// `record.lifetimeUnsubscribe` is installed in `#scheduleBootstrapUpdates`
 		// so it shares the bootstrap race guard — see that comment for why.
 		try {
@@ -1970,6 +1975,7 @@ export class AcpAgent implements Agent {
 
 	async #disposeSessionRecord(record: ManagedSessionRecord): Promise<void> {
 		record.lifetimeUnsubscribe?.();
+		record.session.setAutonomousTurnGuard(undefined);
 		if (record.mcpManager) {
 			try {
 				await record.mcpManager.disconnectAll();

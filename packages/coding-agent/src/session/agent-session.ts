@@ -670,6 +670,11 @@ export class AgentSession {
 	/** Per-session memory of allow_always / reject_always decisions for gated tools. */
 	#acpPermissionDecisions: Map<string, "allow_always" | "reject_always"> = new Map();
 
+	/** Installed by ACP mode to prevent ownerless autonomous turns. Returns true
+	 *  to allow the turn, false to defer by appending to history without promoting.
+	 *  When undefined, all turn triggers proceed normally. */
+	#autonomousTurnGuard: (() => boolean) | undefined = undefined;
+
 	// Compaction state
 	#compactionAbortController: AbortController | undefined = undefined;
 	#autoCompactionAbortController: AbortController | undefined = undefined;
@@ -3534,6 +3539,19 @@ export class AgentSession {
 		this.agent.setTools(activeTools);
 	}
 
+	/** Install or clear the autonomous turn guard. When set, `sendCustomMessage`
+	 *  consults it before starting a new LLM turn in response to a `triggerTurn`
+	 *  request: if the guard returns false the triggering message is appended to
+	 *  session history without firing a new turn, and the next client-initiated
+	 *  prompt picks it up as prior context.
+	 *
+	 *  ACP mode installs this during session registration and clears it on dispose
+	 *  to prevent ownerless turns that start after the ACP prompt response has
+	 *  already been returned to the client (see #1137). */
+	setAutonomousTurnGuard(guard: (() => boolean) | undefined): void {
+		this.#autonomousTurnGuard = guard;
+	}
+
 	getCheckpointState(): CheckpointState | undefined {
 		return this.#checkpointState;
 	}
@@ -4302,6 +4320,17 @@ export class AgentSession {
 
 		if (options?.deliverAs === "nextTurn") {
 			if (options?.triggerTurn) {
+				if (this.#autonomousTurnGuard && !this.#autonomousTurnGuard()) {
+					this.agent.appendMessage(appMessage);
+					this.sessionManager.appendCustomMessageEntry(
+						message.customType,
+						message.content,
+						message.display,
+						message.details,
+						message.attribution ?? "agent",
+					);
+					return;
+				}
 				await this.agent.prompt(appMessage);
 				return;
 			}
@@ -4317,6 +4346,17 @@ export class AgentSession {
 		}
 
 		if (options?.triggerTurn) {
+			if (this.#autonomousTurnGuard && !this.#autonomousTurnGuard()) {
+				this.agent.appendMessage(appMessage);
+				this.sessionManager.appendCustomMessageEntry(
+					message.customType,
+					message.content,
+					message.display,
+					message.details,
+					message.attribution ?? "agent",
+				);
+				return;
+			}
 			await this.agent.prompt(appMessage);
 			return;
 		}
