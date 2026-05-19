@@ -77,6 +77,7 @@ describe("openai-completions compatibility", () => {
 			supportsToolChoice: true,
 			disableReasoningOnForcedToolChoice: false,
 			disableReasoningOnToolChoice: false,
+			disableReasoningWhenToolsPresent: false,
 			maxTokensField: "max_completion_tokens",
 			requiresToolResultName: false,
 			requiresAssistantAfterToolResult: false,

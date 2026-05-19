@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed subagent spawning failing with `400 deepseek-reasoner does not support this tool_choice` when using DeepSeek Flash models (`deepseek-v4-flash`, `deepseek-r1`, `deepseek-reasoner`) via the direct DeepSeek API. These models internally route `reasoning_effort` requests to the `deepseek-reasoner` backend, which rejects any request that includes tools (even without an explicit `tool_choice` field). A new `disableReasoningWhenToolsPresent` compat flag strips `reasoning_effort` from requests that contain tools for affected models. Auto-detected for DeepSeek Flash and R1 models reached via `api.deepseek.com`; can also be set explicitly in user model config. `deepseek-v4-pro` is unaffected ([#1207](https://github.com/can1357/oh-my-pi/issues/1207)).
+
 ## [15.1.7] - 2026-05-19
 ### Added
 

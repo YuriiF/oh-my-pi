@@ -1156,6 +1156,14 @@ function buildParams(
 		delete params.reasoning;
 	}
 
+	if (compat.disableReasoningWhenToolsPresent && params.tools !== undefined) {
+		// Models like deepseek-v4-flash internally route reasoning_effort requests
+		// to deepseek-reasoner, which cannot handle tools. Drop reasoning_effort
+		// to allow tool calling on these models (#1207).
+		delete params.reasoning_effort;
+		delete params.reasoning;
+	}
+
 	if (compat.disableReasoningOnForcedToolChoice && isForcedToolChoice(params.tool_choice)) {
 		// Backends like Kimi 400 with `tool_choice 'specified' is incompatible
 		// with thinking enabled`. Suppress thinking for this single forced-tool

@@ -165,6 +165,19 @@ export function detectOpenAICompat(model: Model<"openai-completions">, resolvedB
 				? { xhigh: "max" }
 				: {};
 
+	// deepseek-v4-flash and deepseek-r1 / deepseek-reasoner route reasoning_effort
+	// requests to the deepseek-reasoner backend, which rejects any request that also
+	// includes tools (the API error "does not support this tool_choice" is misleading;
+	// deepseek-reasoner treats the presence of tools as an implicit tool_choice).
+	// deepseek-v4-pro does NOT exhibit this behavior — it handles reasoning_effort +
+	// tools correctly. Gate on direct DeepSeek API (deepseek.com) to avoid catching
+	// cross-provider mirrors (OpenRouter, Kilo, NVIDIA NIM) where the routing may differ.
+	const isDirectDeepseekApi = baseUrl.includes("deepseek.com") || provider === "deepseek";
+	const isDeepseekReasonerRouted =
+		isDirectDeepseekApi &&
+		Boolean(model.reasoning) &&
+		(lowerId.endsWith("-flash") || lowerId.includes("deepseek-r1") || lowerId === "deepseek-reasoner");
+
 	return {
 		supportsStore: !isNonStandard,
 		supportsDeveloperRole: !isNonStandard,
@@ -174,6 +187,7 @@ export function detectOpenAICompat(model: Model<"openai-completions">, resolvedB
 		supportsUsageInStreaming: !isCerebras,
 		disableReasoningOnForcedToolChoice: isKimiModel || isAnthropicModel,
 		disableReasoningOnToolChoice: isDeepseekFamily && Boolean(model.reasoning),
+		disableReasoningWhenToolsPresent: isDeepseekReasonerRouted,
 		supportsToolChoice: true,
 		maxTokensField: useMaxTokens ? "max_tokens" : "max_completion_tokens",
 		requiresToolResultName: isMistral,
@@ -256,6 +270,8 @@ export function resolveOpenAICompat(
 		disableReasoningOnForcedToolChoice:
 			model.compat.disableReasoningOnForcedToolChoice ?? detected.disableReasoningOnForcedToolChoice,
 		disableReasoningOnToolChoice: model.compat.disableReasoningOnToolChoice ?? detected.disableReasoningOnToolChoice,
+		disableReasoningWhenToolsPresent:
+			model.compat.disableReasoningWhenToolsPresent ?? detected.disableReasoningWhenToolsPresent,
 		openRouterRouting: model.compat.openRouterRouting ?? detected.openRouterRouting,
 		vercelGatewayRouting: model.compat.vercelGatewayRouting ?? detected.vercelGatewayRouting,
 		supportsStrictMode: model.compat.supportsStrictMode ?? detected.supportsStrictMode,
