@@ -125,4 +125,37 @@ describe("compactAlgorithmically", () => {
 		expect(result.summary).toContain("…");
 		expect(result.summary.length).toBeLessThan(4_000);
 	});
+
+	test("carries forward extension preserveData from the prior compaction entry and overlays hook payload", () => {
+		const previousPreserveData = {
+			ext_state: { rules: ["rule-1", "rule-2"] },
+			openaiRemoteCompaction: { provider: "openai", replacementHistory: [], compactionItem: { type: "cached" } },
+		};
+		const result = compactAlgorithmically(makePreparation({ previousPreserveData }), {
+			preserveData: { ext_state: { rules: ["rule-2", "rule-3"] }, extra_flag: true },
+		});
+
+		// Hook payload wins on collision (extensions can update what they wrote
+		// last turn), but no previously-stored extension key disappears unless
+		// explicitly overwritten.
+		expect(result.preserveData).toEqual({
+			ext_state: { rules: ["rule-2", "rule-3"] },
+			extra_flag: true,
+		});
+	});
+
+	test("strips stale openai-remote-compaction state when no hook payload is supplied", () => {
+		const previousPreserveData = {
+			ext_state: { last_seen: "abc" },
+			openaiRemoteCompaction: { provider: "openai", replacementHistory: [], compactionItem: { type: "cached" } },
+		};
+		const result = compactAlgorithmically(makePreparation({ previousPreserveData }));
+
+		expect(result.preserveData).toEqual({ ext_state: { last_seen: "abc" } });
+	});
+
+	test("returns undefined preserveData when neither prior nor current state exists", () => {
+		const result = compactAlgorithmically(makePreparation());
+		expect(result.preserveData).toBeUndefined();
+	});
 });

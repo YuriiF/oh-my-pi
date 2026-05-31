@@ -7,6 +7,7 @@
  */
 import type { AgentMessage } from "../../types";
 import type { CompactionDetails, CompactionPreparation, CompactionResult } from "../compaction";
+import { withOpenAiRemoteCompactionPreserveData } from "../openai";
 import { computeFileLists } from "../utils";
 
 const VERSION = 1;
@@ -79,8 +80,29 @@ export function compactAlgorithmically(
 		firstKeptEntryId: preparation.firstKeptEntryId,
 		tokensBefore: preparation.tokensBefore,
 		details,
-		preserveData: options.preserveData,
+		preserveData: mergePreserveData(preparation.previousPreserveData, options.preserveData),
 	};
+}
+
+/**
+ * Carry forward non-OpenAI extension state from the previous compaction entry
+ * and overlay any hook-supplied payload from this run.
+ *
+ * The LLM compactor uses `withOpenAiRemoteCompactionPreserveData(previous, undefined)`
+ * for the same reason: strip the stale openai-remote-compaction key (we are not
+ * issuing a remote compaction call) while keeping other extension/session state.
+ * Hook payloads from `options.preserveData` win on key collision so extensions can
+ * actively update the data they wrote on the prior turn.
+ */
+function mergePreserveData(
+	previous: Record<string, unknown> | undefined,
+	current: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+	const carriedOver = withOpenAiRemoteCompactionPreserveData(previous, undefined);
+	if (!carriedOver && !current) return undefined;
+	if (!current) return carriedOver;
+	if (!carriedOver) return current;
+	return { ...carriedOver, ...current };
 }
 
 function renderSections(sections: readonly (readonly [string, string])[]): string {

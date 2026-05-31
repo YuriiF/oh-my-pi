@@ -38,6 +38,26 @@ export class MemoryRecallTool implements AgentTool<typeof memoryRecallSchema> {
 					throw new Error("Mnemosyne backend is not initialised for this session.");
 				}
 				try {
+					const idQuery = parseRecallIdQuery(params.query);
+					if (idQuery) {
+						const hit = state.lookupScopedById(idQuery);
+						if (!hit) {
+							return {
+								content: [{ type: "text", text: `No memory with id ${idQuery} found in the scoped banks.` }],
+								details: { id: idQuery },
+							};
+						}
+						return {
+							content: [
+								{
+									type: "text",
+									text: `Memory ${idQuery} (bank: ${hit.bank}, as of ${formatCurrentTime()} UTC):\n\n${formatMemoryRow(hit.row)}`,
+								},
+							],
+							details: { id: idQuery, bank: hit.bank },
+						};
+					}
+
 					const results = state.recallResultsScoped(params.query);
 					if (results.length === 0) {
 						return {
@@ -97,4 +117,37 @@ export class MemoryRecallTool implements AgentTool<typeof memoryRecallSchema> {
 			}
 		});
 	}
+}
+
+/**
+ * Detect `id:<…>` / `[id:<…>]` shapes anywhere in the query and return the
+ * bare id. Used by the recall tool to short-circuit to an exact lookup when
+ * the model already knows the id printed by `formatScopedRecallWithIds()`.
+ */
+export function parseRecallIdQuery(query: string): string | undefined {
+	if (!query) return undefined;
+	const trimmed = query.trim();
+	const explicit = /^id:\s*([A-Za-z0-9_:-]{4,})$/.exec(trimmed);
+	if (explicit) return explicit[1];
+	const bracketed = /\[id:\s*([A-Za-z0-9_:-]{4,})\]/i.exec(trimmed);
+	if (bracketed) return bracketed[1];
+	return undefined;
+}
+
+function formatMemoryRow(row: Record<string, unknown>): string {
+	const content = pickString(row.content) ?? "(empty content)";
+	const source = pickString(row.source);
+	const timestamp = pickString(row.timestamp);
+	const importance = typeof row.importance === "number" ? row.importance.toFixed(1) : undefined;
+	const veracity = pickString(row.veracity);
+	const metaFields: string[] = [];
+	if (source) metaFields.push(`source: ${source}`);
+	if (timestamp) metaFields.push(`timestamp: ${timestamp}`);
+	if (importance) metaFields.push(`importance: ${importance}`);
+	if (veracity) metaFields.push(`veracity: ${veracity}`);
+	return metaFields.length > 0 ? `${content}\n(${metaFields.join(", ")})` : content;
+}
+
+function pickString(value: unknown): string | undefined {
+	return typeof value === "string" && value.length > 0 ? value : undefined;
 }

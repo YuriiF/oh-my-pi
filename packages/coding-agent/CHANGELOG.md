@@ -7,6 +7,9 @@
 - Added expansion of virtual internal URL search targets so `search` can match multiple internal documents when given `omp://`
 - Added `/omfg <complaint>` slash command that drafts a TTSR rule from a complaint, validates it against the current conversation, saves it to project or `~/.omp/agent/rules`, and registers it live.
 - Added `compaction.strategy=algorithmic`, exposing the deterministic algorithmic compaction provider derived from the MIT-licensed pi-vcc/pi-observational-memory/pi-blackhole lineage ([#1565](https://github.com/can1357/oh-my-pi/issues/1565)).
+- Added `WorkerCooldownStore` for per-(worker, provider, model) persistent cooldown state with structured error classification that explicitly excludes auth, schema, and abort errors. Derived from the MIT-licensed pi-blackhole cooldown design ([#1565](https://github.com/can1357/oh-my-pi/issues/1565)).
+- Added an `id:<…>` form to the `recall` tool so the model can re-fetch a memory it saw in prior recall output without rerunning BM25/vector search ([#1565](https://github.com/can1357/oh-my-pi/issues/1565)).
+- Added source-addressed observation helpers (`buildObservationMetadata`, `recordObservation`, `readObservationMetadata`) that store observation evidence in Mnemosyne's existing metadata column with a versioned schema. Derived from the MIT-licensed pi-observational-memory observation model ([#1565](https://github.com/can1357/oh-my-pi/issues/1565)).
 
 ### Changed
 
@@ -21,6 +24,7 @@
 - Fixed `search` to handle internal URLs without source files without incorrectly reporting `Path not found`, returning matches from virtual content instead
 - Fixed `/omfg` parsing to tolerate fenced or noisy model output, normalize generated rule names, and reject invalid regex conditions before saving
 - Fixed auto-thinking sessions to persist the concrete resolved effort after classification, so resuming the session restores that level instead of returning to pending `auto`.
+- Fixed algorithmic compaction dropping extension `preserveData` written to the previous compaction entry; the provider now carries non-OpenAI keys forward (mirroring `withOpenAiRemoteCompactionPreserveData`) and overlays the current hook payload on top ([#1565](https://github.com/can1357/oh-my-pi/issues/1565)).
 
 ## [15.7.2] - 2026-05-31
 ### Added

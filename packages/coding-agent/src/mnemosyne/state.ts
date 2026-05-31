@@ -160,6 +160,30 @@ export class MnemosyneSessionState {
 		return ineligible ?? { status: "not_found" };
 	}
 
+	/**
+	 * Look up a single stored memory by id across every scoped target (retain
+	 * bank, recall banks, and the shared global bank in `per-project-tagged`).
+	 *
+	 * Used by the recall tool's `id:<…>` form so the model can expand a memory
+	 * it saw previously (typically via the id printed by
+	 * {@link formatScopedRecallWithIds}) without rerunning the BM25/vector
+	 * pipeline.
+	 */
+	lookupScopedById(id: string): { bank: string; row: Record<string, unknown> } | undefined {
+		const trimmed = id.trim();
+		if (!trimmed) return undefined;
+		const targets = dedupeScopedTargets([
+			this.scoped.retain,
+			...this.scoped.recall,
+			...(this.scoped.global ? [this.scoped.global] : []),
+		]);
+		for (const target of targets) {
+			const row = target.memory.get(trimmed) as Record<string, unknown> | null;
+			if (row) return { bank: target.bank, row };
+		}
+		return undefined;
+	}
+
 	formatScopedRecallWithIds(results: readonly RecallResult[]): string {
 		if (results.length === 0) return "";
 		const lines = results.map(result => {
