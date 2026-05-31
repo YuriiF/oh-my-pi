@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed Anthropic stream idle-timeout retries after the provider stream has already begun.
+- Fixed Xiaomi MiMo `/login` validation to send `Authorization: Bearer` instead of `x-api-key`, matching runtime OpenAI-compatible requests. ([#1582](https://github.com/can1357/oh-my-pi/issues/1582))
 
 ## [15.7.3] - 2026-05-31
 
