@@ -1108,7 +1108,7 @@ function b() {
 			const updates: string[] = [];
 			const result = await bashTool.execute(
 				"test-call-8-stream",
-				{ command: "for i in 1 2 3; do echo $i; sleep 0.05; done" },
+				{ command: "for i in 1 2 3; do echo $i; sleep 0.2; done" },
 				undefined,
 				update => {
 					const text = update.content?.find(c => c.type === "text")?.text ?? "";
@@ -1167,7 +1167,7 @@ function b() {
 						testDir,
 						Settings.isolated({
 							"bash.autoBackground.enabled": true,
-							"bash.autoBackground.thresholdMs": 50,
+							"bash.autoBackground.thresholdMs": 2_000,
 						}),
 						{
 							getSessionId: () => "test-session",

@@ -62,6 +62,7 @@ import type { AgentSession, AgentSessionEvent, ResolvedRoleModel } from "../sess
 import { HistoryStorage } from "../session/history-storage";
 import type { SessionContext, SessionManager } from "../session/session-manager";
 import { getRecentSessions } from "../session/session-manager";
+import type { ShakeMode } from "../session/shake-types";
 import { formatDuration } from "../slash-commands/helpers/format";
 import { STTController, type SttState } from "../stt";
 import type { LspStartupServerInfo } from "../tools";
@@ -91,6 +92,7 @@ import { EventController } from "./controllers/event-controller";
 import { ExtensionUiController } from "./controllers/extension-ui-controller";
 import { InputController } from "./controllers/input-controller";
 import { MCPCommandController } from "./controllers/mcp-command-controller";
+import { OmfgController } from "./controllers/omfg-controller";
 import { SelectorController } from "./controllers/selector-controller";
 import { SSHCommandController } from "./controllers/ssh-command-controller";
 import { TodoCommandController } from "./controllers/todo-command-controller";
@@ -236,6 +238,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	statusContainer: Container;
 	todoContainer: Container;
 	btwContainer: Container;
+	omfgContainer: Container;
 	editor: CustomEditor;
 	editorContainer: Container;
 	hookWidgetContainerAbove: Container;
@@ -315,6 +318,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	readonly #toolUiContextSetter: (uiContext: ExtensionUIContext, hasUI: boolean) => void;
 
 	readonly #btwController: BtwController;
+	readonly #omfgController: OmfgController;
 	readonly #commandController: CommandController;
 	readonly #todoCommandController: TodoCommandController;
 	readonly #eventController: EventController;
@@ -368,6 +372,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.statusContainer = new Container();
 		this.todoContainer = new Container();
 		this.btwContainer = new Container();
+		this.omfgContainer = new Container();
 		this.editor = new CustomEditor(getEditorTheme());
 		this.editor.setUseTerminalCursor(this.ui.getShowHardwareCursor());
 		this.editor.setAutocompleteMaxVisible(settings.get("autocompleteMaxVisible"));
@@ -429,6 +434,7 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		this.#uiHelpers = new UiHelpers(this);
 		this.#btwController = new BtwController(this);
+		this.#omfgController = new OmfgController(this);
 		this.#extensionUiController = new ExtensionUiController(this);
 		this.#eventController = new EventController(this);
 		this.#commandController = new CommandController(this);
@@ -526,6 +532,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.ui.addChild(this.statusContainer);
 		this.ui.addChild(this.todoContainer);
 		this.ui.addChild(this.btwContainer);
+		this.ui.addChild(this.omfgContainer);
 		this.ui.addChild(this.statusLine); // Only renders hook statuses (main status in editor border)
 		this.ui.addChild(this.hookWidgetContainerAbove);
 		this.ui.addChild(this.editorContainer);
@@ -2034,16 +2041,20 @@ export class InteractiveMode implements InteractiveModeContext {
 				: "Approve and keep context";
 
 		// Model-tier slider: let the operator pick which configured role model
-		// (smol/default/slow/…) executes the approved plan. Left/right move it from
-		// any list position. Hidden when fewer than two role models resolve — a lone
-		// tier is no choice. `selectedTierIndex` tracks the live slider position.
+		// (smol/default/slow/…) executes the approved plan. The slider always starts
+		// on the `default` tier so execution defaults to the default model no matter
+		// which model drove the planning conversation. Left/right move it from there;
+		// hidden when fewer than two role models resolve — a lone tier is no choice.
+		// `selectedTierIndex` tracks the live slider position.
 		const cycle = this.session.getRoleModelCycle(this.session.settings.get("cycleOrder"));
-		let selectedTierIndex = cycle?.currentIndex ?? 0;
+		const defaultTierIndex = cycle ? cycle.models.findIndex(entry => entry.role === "default") : -1;
+		const startTierIndex = defaultTierIndex >= 0 ? defaultTierIndex : (cycle?.currentIndex ?? 0);
+		let selectedTierIndex = startTierIndex;
 		const slider: HookSelectorSlider | undefined =
 			cycle && cycle.models.length > 1
 				? {
 						caption: "continue with",
-						index: cycle.currentIndex,
+						index: startTierIndex,
 						segments: cycle.models.map(entry => ({
 							label: entry.role,
 							color: MODEL_ROLES[entry.role as ModelRole]?.color,
@@ -2080,6 +2091,9 @@ export class InteractiveMode implements InteractiveModeContext {
 				// applying the slider choice any earlier would be silently reverted —
 				// the bug that made "continue with slow" keep executing on the default
 				// model. Deferred application also survives newSession()/compaction.
+				// `cycle.currentIndex` is exactly that restored model, so any chosen tier
+				// differing from it needs an explicit executionModel — this also covers
+				// leaving the slider on its `default` anchor while planning ran elsewhere.
 				const executionModel =
 					cycle && selectedTierIndex !== cycle.currentIndex ? cycle.models[selectedTierIndex] : undefined;
 				await this.#approvePlan(latestPlanContent, {
@@ -2211,6 +2225,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			logger.warn("Failed to save session draft", { error: String(err) });
 		}
 		this.#btwController.dispose();
+		this.#omfgController.dispose();
 
 		// Emit shutdown event to hooks
 		await this.session.dispose();
@@ -2532,6 +2547,7 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	#prepareSessionSwitch(): void {
 		this.#btwController.dispose();
+		this.#omfgController.dispose();
 		this.#extensionUiController.clearExtensionTerminalInputListeners();
 		this.#planReviewContainer = undefined;
 	}
@@ -2548,6 +2564,7 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	handleForkCommand(): Promise<void> {
 		this.#btwController.dispose();
+		this.#omfgController.dispose();
 		return this.#commandController.handleForkCommand();
 	}
 
@@ -2683,6 +2700,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		return this.#commandController.handleHandoffCommand(customInstructions);
 	}
 
+	handleShakeCommand(mode: ShakeMode): Promise<void> {
+		return this.#commandController.handleShakeCommand(mode);
+	}
+
 	executeCompaction(
 		customInstructionsOrOptions?: string | CompactOptions,
 		isAuto?: boolean,
@@ -2733,6 +2754,7 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	handleResumeSession(sessionPath: string): Promise<void> {
 		this.#btwController.dispose();
+		this.#omfgController.dispose();
 		this.resetObserverRegistry();
 		return this.#selectorController.handleResumeSession(sessionPath);
 	}
@@ -2786,12 +2808,24 @@ export class InteractiveMode implements InteractiveModeContext {
 		return this.#btwController.handleEscape();
 	}
 
+	handleOmfgCommand(complaint: string): Promise<void> {
+		return this.#omfgController.start(complaint);
+	}
+
+	hasActiveOmfg(): boolean {
+		return this.#omfgController.hasActiveRequest();
+	}
+
+	handleOmfgEscape(): boolean {
+		return this.#omfgController.handleEscape();
+	}
+
 	cycleThinkingLevel(): void {
 		this.#inputController.cycleThinkingLevel();
 	}
 
-	cycleRoleModel(options?: { temporary?: boolean }): Promise<void> {
-		return this.#inputController.cycleRoleModel(options);
+	cycleRoleModel(direction?: "forward" | "backward"): Promise<void> {
+		return this.#inputController.cycleRoleModel(direction);
 	}
 
 	toggleToolOutputExpansion(): void {

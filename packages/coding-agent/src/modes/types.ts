@@ -16,6 +16,7 @@ import type { PlanApprovalDetails } from "../plan-mode/approved-plan";
 import type { AgentSession, AgentSessionEvent } from "../session/agent-session";
 import type { HistoryStorage } from "../session/history-storage";
 import type { SessionContext, SessionManager } from "../session/session-manager";
+import type { ShakeMode } from "../session/shake-types";
 import type { LspStartupServerInfo } from "../tools";
 import type { AssistantMessageComponent } from "./components/assistant-message";
 import type { BashExecutionComponent } from "./components/bash-execution";
@@ -70,6 +71,7 @@ export interface InteractiveModeContext {
 	statusContainer: Container;
 	todoContainer: Container;
 	btwContainer: Container;
+	omfgContainer: Container;
 	editor: CustomEditor;
 	editorContainer: Container;
 	hookWidgetContainerAbove: Container;
@@ -228,6 +230,7 @@ export interface InteractiveModeContext {
 	handleSSHCommand(text: string): Promise<void>;
 	handleCompactCommand(customInstructions?: string): Promise<CompactionOutcome>;
 	handleHandoffCommand(customInstructions?: string): Promise<void>;
+	handleShakeCommand(mode: ShakeMode): Promise<void>;
 	handleMoveCommand(targetPath: string): Promise<void>;
 	handleRenameCommand(title: string): Promise<void>;
 	handleMemoryCommand(text: string): Promise<void>;
@@ -267,8 +270,11 @@ export interface InteractiveModeContext {
 	handleBtwCommand(question: string): Promise<void>;
 	hasActiveBtw(): boolean;
 	handleBtwEscape(): boolean;
+	handleOmfgCommand(complaint: string): Promise<void>;
+	hasActiveOmfg(): boolean;
+	handleOmfgEscape(): boolean;
 	cycleThinkingLevel(): void;
-	cycleRoleModel(options?: { temporary?: boolean }): Promise<void>;
+	cycleRoleModel(direction?: "forward" | "backward"): Promise<void>;
 	toggleToolOutputExpansion(): void;
 	setToolsExpanded(expanded: boolean): void;
 	toggleThinkingBlockVisibility(): void;
