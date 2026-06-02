@@ -5251,7 +5251,7 @@ export class AgentSession {
 
 		if (models.length === 0) return undefined;
 
-		const lastRole = this.sessionManager.getLastModelChangeRole();
+		const lastRole = this.sessionManager.getLastRestorableModelChangeRole();
 		let currentIndex = lastRole ? models.findIndex(entry => entry.role === lastRole) : -1;
 		if (currentIndex === -1) {
 			currentIndex = models.findIndex(entry => modelsAreEqual(entry.model, currentModel));
@@ -8725,7 +8725,7 @@ export class AgentSession {
 			// Restore model if saved
 			const targetModelStrings = getRestorableSessionModels(
 				sessionContext.models,
-				this.sessionManager.getLastModelChangeRole(),
+				this.sessionManager.getLastRestorableModelChangeRole(),
 			);
 			if (targetModelStrings.length > 0) {
 				const availableModels = this.#modelRegistry.getAvailable();

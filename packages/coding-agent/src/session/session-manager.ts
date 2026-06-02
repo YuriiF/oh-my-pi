@@ -2977,10 +2977,25 @@ export class SessionManager {
 	 * Returns undefined if no model change has been recorded.
 	 */
 	getLastModelChangeRole(): string | undefined {
+		return this.#getLastModelChangeRole();
+	}
+
+	/**
+	 * Get the most recent non-temporary model role from the current session path.
+	 * Temporary model changes are transient fallbacks and must not be restored.
+	 */
+	getLastRestorableModelChangeRole(): string | undefined {
+		return this.#getLastModelChangeRole({ skipTemporary: true });
+	}
+
+	#getLastModelChangeRole(options?: { skipTemporary?: boolean }): string | undefined {
 		let current = this.getLeafEntry();
 		while (current) {
 			if (current.type === "model_change") {
-				return current.role ?? "default";
+				const role = current.role ?? "default";
+				if (!options?.skipTemporary || role !== "temporary") {
+					return role;
+				}
 			}
 			current = current.parentId ? this.#byId.get(current.parentId) : undefined;
 		}
