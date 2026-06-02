@@ -1,9 +1,16 @@
 import type { Api, Model } from "./types";
 
-/** Provider cache block sizes used when callers do not override alignment. */
+/**
+ * Provider cache block sizes used when callers do not override alignment.
+ *
+ * - `anthropic`: 128-token blocks per Anthropic prompt-caching docs.
+ * - `openaiResponses`: 128-token blocks. OpenAI prompt caching only reuses
+ *   prefixes in 128-token increments after a 1024-token floor — the smaller
+ *   64-token chunk boundary is not a cacheable reuse boundary.
+ */
 export const CACHE_OPTIMIZER_BLOCK_TOKENS = {
 	anthropic: 128,
-	openaiResponses: 64,
+	openaiResponses: 128,
 } as const;
 
 /** A stable-prefix fragment as seen by provider-specific cache alignment. */
