@@ -1,6 +1,7 @@
 //! Runtime-agnostic brush shell execution.
 
 use std::{
+	borrow::Cow,
 	collections::{HashMap, HashSet},
 	fs,
 	io::{self, Write},
@@ -570,6 +571,127 @@ async fn source_snapshot(shell: &mut BrushShell, snapshot_path: &str) -> Result<
 	Ok(())
 }
 
+fn command_for_brush_parser(command: &str) -> Cow<'_, str> {
+	#[cfg(windows)]
+	{
+		escape_windows_drive_paths_for_brush(command)
+	}
+	#[cfg(not(windows))]
+	{
+		Cow::Borrowed(command)
+	}
+}
+
+fn escape_windows_drive_paths_for_brush(command: &str) -> Cow<'_, str> {
+	let bytes = command.as_bytes();
+	let mut rewritten: Option<String> = None;
+	let mut cursor = 0;
+	let mut i = 0;
+
+	while i < bytes.len() {
+		match bytes[i] {
+			b'\'' => {
+				i += 1;
+				while i < bytes.len() && bytes[i] != b'\'' {
+					i += 1;
+				}
+				if i < bytes.len() {
+					i += 1;
+				}
+			},
+			b'"' => {
+				i += 1;
+				let content_start = i;
+				let mut closed = false;
+				while i < bytes.len() {
+					if bytes[i] == b'\\'
+						&& i + 1 < bytes.len()
+						&& matches!(bytes[i + 1], b'$' | b'`' | b'"' | b'\\' | b'\n' | b'\r')
+					{
+						i += 2;
+						continue;
+					}
+					if bytes[i] == b'"' {
+						closed = true;
+						break;
+					}
+					i += 1;
+				}
+				if !closed {
+					break;
+				}
+				let content = &command[content_start..i];
+				if is_windows_drive_path_literal(content) && content_needs_extra_backslashes(content) {
+					let out = rewritten.get_or_insert_with(|| String::with_capacity(command.len() + 8));
+					out.push_str(&command[cursor..content_start]);
+					append_double_quote_safe_windows_path(out, content);
+					cursor = i;
+				}
+				i += 1;
+			},
+			_ => i += 1,
+		}
+	}
+
+	if let Some(mut out) = rewritten {
+		out.push_str(&command[cursor..]);
+		Cow::Owned(out)
+	} else {
+		Cow::Borrowed(command)
+	}
+}
+
+fn is_windows_drive_path_literal(content: &str) -> bool {
+	let bytes = content.as_bytes();
+	bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'\\'
+}
+
+fn content_needs_extra_backslashes(content: &str) -> bool {
+	let bytes = content.as_bytes();
+	let mut i = 0;
+	while i < bytes.len() {
+		if bytes[i] != b'\\' {
+			i += 1;
+			continue;
+		}
+		if i + 1 >= bytes.len() {
+			return true;
+		}
+		if bytes[i + 1] == b'\\' {
+			i += 2;
+			continue;
+		}
+		if !matches!(bytes[i + 1], b'$' | b'`' | b'"' | b'\n' | b'\r') {
+			return true;
+		}
+		i += 1;
+	}
+	false
+}
+
+fn append_double_quote_safe_windows_path(out: &mut String, content: &str) {
+	let mut chars = content.chars().peekable();
+	while let Some(ch) = chars.next() {
+		if ch != '\\' {
+			out.push(ch);
+			continue;
+		}
+		if chars.peek().is_some_and(|next| *next == '\\') {
+			out.push('\\');
+			out.push('\\');
+			chars.next();
+			continue;
+		}
+		out.push('\\');
+		if !chars
+			.peek()
+			.is_some_and(|next| matches!(*next, '$' | '`' | '"' | '\n' | '\r'))
+		{
+			out.push('\\');
+		}
+	}
+}
+
 async fn run_shell_command(
 	session: &mut ShellSessionCore,
 	options: &ShellRunConfig,
@@ -657,9 +779,10 @@ async fn run_shell_command(
 		}
 	});
 	let source_info = SourceInfo::from("pi-natives:command");
+	let command = command_for_brush_parser(&options.command).into_owned();
 	let result = session
 		.shell
-		.run_string(options.command.clone(), &source_info, &params)
+		.run_string(command, &source_info, &params)
 		.await;
 
 	if cancel_token.is_cancelled() {
@@ -827,9 +950,10 @@ async fn run_shell_command_streams(
 		}
 	});
 	let source_info = SourceInfo::from("pi-shell:streams");
+	let command = command_for_brush_parser(&options.command).into_owned();
 	let result = session
 		.shell
-		.run_string(options.command.clone(), &source_info, &params)
+		.run_string(command, &source_info, &params)
 		.await;
 
 	if cancel_token.is_cancelled() {
@@ -1614,6 +1738,34 @@ fn quote_arg(arg: &str) -> String {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	#[test]
+	fn escapes_raw_backslashes_in_double_quoted_windows_drive_paths() {
+		let command = r#"ls "C:\Users\james\.omp\agent\sessions\--C--Program Files (x86)-Steam""#;
+		let escaped = escape_windows_drive_paths_for_brush(command);
+		assert_eq!(
+			escaped.as_ref(),
+			r#"ls "C:\\Users\\james\\.omp\\agent\\sessions\\--C--Program Files (x86)-Steam""#,
+		);
+	}
+
+	#[test]
+	fn leaves_non_drive_paths_and_single_quoted_windows_paths_unchanged() {
+		assert!(matches!(
+			escape_windows_drive_paths_for_brush(r#"echo "not C:\Users\james""#),
+			Cow::Borrowed(_)
+		));
+		assert!(matches!(
+			escape_windows_drive_paths_for_brush(r#"ls 'C:\Users\james\Project Files'"#),
+			Cow::Borrowed(_)
+		));
+	}
+
+	#[test]
+	fn preserves_double_quote_special_backslash_escapes() {
+		let command = r#"printf "%s\n" "C:\$Recycle.Bin\name\"with-quote""#;
+		let escaped = escape_windows_drive_paths_for_brush(command);
+		assert_eq!(escaped.as_ref(), r#"printf "%s\n" "C:\$Recycle.Bin\\name\"with-quote""#);
+	}
 
 	/// Truth-table coverage for `brush_core::commands::child_session_action`.
 	///
