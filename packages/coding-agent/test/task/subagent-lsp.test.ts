@@ -268,11 +268,36 @@ describe("subagent LSP availability", () => {
 		const tool = await TaskTool.create(createSession({ planMode }));
 		await tool.execute("tool-call", { ...TEST_TASK, agent: "reviewer" });
 
-		// `bash` dropped (not in READ_ONLY_TOOL_NAMES); `report_finding` and
+		// `bash` dropped (not in PLAN_MODE_EXTRA_TOOLS); `report_finding` and
 		// `ast_grep` preserved so reviewer's prompt and tool inventory agree.
 		const toolNames = getOptions()?.toolNames;
 		expect(toolNames).toContain("report_finding");
 		expect(toolNames).toContain("ast_grep");
 		expect(toolNames).not.toContain("bash");
+	});
+
+	it("drops read-tier but state-mutating agent tools in plan mode (e.g. memory_edit)", async () => {
+		mockAgents({
+			name: "memo_scout",
+			description: "Custom scout that edits long-term memory",
+			systemPrompt: "Scout the codebase and record memories.",
+			source: "project",
+			// `memory_edit`, `retain`, `reflect`, `checkpoint`, and `todo` are all
+			// approval-tier "read" but mutate persistent state — they must not
+			// survive the plan-mode tool filter.
+			tools: ["read", "search", "memory_edit", "retain", "reflect", "checkpoint", "todo"],
+		});
+		const { getOptions } = mockCreateAgentSession();
+		const planMode = { enabled: true, planFilePath: "local://PLAN.md" };
+
+		const tool = await TaskTool.create(createSession({ planMode }));
+		await tool.execute("tool-call", { ...TEST_TASK, agent: "memo_scout" });
+
+		const toolNames = getOptions()?.toolNames ?? [];
+		expect(toolNames).not.toContain("memory_edit");
+		expect(toolNames).not.toContain("retain");
+		expect(toolNames).not.toContain("reflect");
+		expect(toolNames).not.toContain("checkpoint");
+		expect(toolNames).not.toContain("todo");
 	});
 });

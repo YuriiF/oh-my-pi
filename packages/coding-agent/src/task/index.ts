@@ -162,6 +162,17 @@ export function isReadOnlyAgent(agent: AgentDefinition): boolean {
 	return !!agent.tools?.length && agent.tools.every(tool => READ_ONLY_TOOL_NAMES.has(tool));
 }
 
+// Specialty tools that may be carried over into plan-mode subagents on top of
+// `planModeBaseTools` when an agent declares them. Intentionally narrower than
+// `READ_ONLY_TOOL_NAMES`: that set is "approval tier = read", which still
+// includes tools with persistent side effects (`memory_edit`, `retain`,
+// `reflect`, `checkpoint`, `rewind`, `todo`, `job`). Plan mode must stay
+// side-effect-free, so only genuinely read-only specialty tools belong here.
+export const PLAN_MODE_EXTRA_TOOLS: ReadonlySet<string> = new Set([
+	"ast_grep",
+	"report_finding",
+]);
+
 /**
  * Render the tool description from a cached agent list and current settings.
  */
@@ -674,13 +685,15 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 
 		const planModeState = this.session.getPlanModeState?.();
 		// Plan-mode subagents get a fixed read-only base. Additionally preserve any
-		// agent-declared tools that are already classified as read-only (e.g. the
+		// agent-declared specialty tools from `PLAN_MODE_EXTRA_TOOLS` (e.g. the
 		// reviewer's `report_finding`, or `ast_grep`) so the agent's system prompt
-		// and tool inventory don't disagree (issue #1998).
+		// and tool inventory don't disagree (issue #1998). Stays narrower than
+		// `READ_ONLY_TOOL_NAMES` to keep memory/state-mutating read-tier tools out
+		// of plan mode.
 		const planModeBaseTools = ["read", "search", "find", "lsp", "web_search"];
-		const declaredReadOnlyExtras =
-			agent.tools?.filter(name => !planModeBaseTools.includes(name) && READ_ONLY_TOOL_NAMES.has(name)) ?? [];
-		const planModeTools = [...planModeBaseTools, ...declaredReadOnlyExtras];
+		const declaredPlanModeExtras =
+			agent.tools?.filter(name => !planModeBaseTools.includes(name) && PLAN_MODE_EXTRA_TOOLS.has(name)) ?? [];
+		const planModeTools = [...planModeBaseTools, ...declaredPlanModeExtras];
 		const effectiveAgent: typeof agent = planModeState?.enabled
 			? {
 					...agent,
